@@ -1,3 +1,4 @@
 # Default configuration for relay-phone
 CONFIG_IDF_TARGET="esp32"
 CONFIG_LOG_DEFAULT_LEVEL=3
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
