@@ -1,8 +1,18 @@
 #ifndef GAP_H
 #define GAP_H
 
+#include <stdbool.h>
+#include <string.h>
 #include "esp_gap_bt_api.h"
 #include "esp_hf_client_api.h"
+
+#ifndef BT_PIN
+#define BT_PIN "0000"
+#endif
+
+#ifndef REMOTE_DEVICE_NAME
+#define REMOTE_DEVICE_NAME ""
+#endif
 
 void gap_init(void);
 

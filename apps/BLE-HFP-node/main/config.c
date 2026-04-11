@@ -37,9 +37,6 @@ void bt_controller_init_enable(void)
 void bluedroid_init_enable(void)
 {
     esp_bluedroid_config_t bluedroid_cfg = BT_BLUEDROID_INIT_CONFIG_DEFAULT();
-#if (CONFIG_EXAMPLE_SSP_ENABLED == false)
-    bluedroid_cfg.ssp_en = false;
-#endif
 
     ESP_ERROR_CHECK(esp_bluedroid_init_with_cfg(&bluedroid_cfg));
     ESP_ERROR_CHECK(esp_bluedroid_enable());
