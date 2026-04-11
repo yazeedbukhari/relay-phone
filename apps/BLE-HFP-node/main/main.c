@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "esp_bt_device.h"
 #include "gap.h"
+#include "phone.h"
 
 static char *bda2str(esp_bd_addr_t bda, char *str, size_t size)
 {
@@ -26,6 +27,12 @@ void app_main(void)
     ESP_LOGI("BT_HF", "Own address:[%s]", bda2str((uint8_t *)esp_bt_dev_get_address(), bda_str, sizeof(bda_str)));
 
     while (1) {
+        if (gap_is_ring_active()) {
+            phone_play_ringtone_tick();
+        } else {
+            phone_stop_ringtone();
+        }
+
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

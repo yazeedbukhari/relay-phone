@@ -15,6 +15,7 @@
 #endif
 
 void gap_init(void);
+bool gap_is_ring_active(void);
 
 void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param);
 void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param);

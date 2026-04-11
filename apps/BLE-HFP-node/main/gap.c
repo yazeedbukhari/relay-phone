@@ -16,6 +16,11 @@ static bool target_found = false;
 static bool discovery_active = false;
 static bool hf_connecting = false;
 static bool hf_connected = false;
+static bool call_active = false;
+static bool ring_active = false;
+static bool audio_active = false;
+static esp_hf_call_setup_status_t call_setup_state = ESP_HF_CALL_SETUP_STATUS_IDLE;
+static char caller_number[ESP_BT_HF_CLIENT_NUMBER_LEN + 1];
 
 static bool parse_ssp_passkey(const char *passkey_str, uint32_t *passkey_out)
 {
@@ -111,6 +116,7 @@ void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 
     switch (event) {
     case ESP_BT_GAP_DISC_RES_EVT: {
+        // Handle each discovery result and connect when the configured target name is found.
         if (hf_connected || hf_connecting) {
             break;
         }
@@ -132,6 +138,7 @@ void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
         break;
     }
     case ESP_BT_GAP_DISC_STATE_CHANGED_EVT:
+        // Track inquiry lifecycle and keep discovery/reconnect loop running when not connected.
         discovery_active = (param->disc_st_chg.state == ESP_BT_GAP_DISCOVERY_STARTED);
         ESP_LOGI(BT_HF_TAG, "Discovery state: %s",
                  discovery_active ? "started" : "stopped");
@@ -142,6 +149,7 @@ void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
         }
         break;
     case ESP_BT_GAP_AUTH_CMPL_EVT: {
+        // Pairing/authentication result from the remote device.
         if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
             ESP_LOGI(BT_HF_TAG, "Authentication success: %s", param->auth_cmpl.device_name);
             ESP_LOG_BUFFER_HEX(BT_HF_TAG, param->auth_cmpl.bda, ESP_BD_ADDR_LEN);
@@ -151,14 +159,17 @@ void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
         break;
     }
     case ESP_BT_GAP_CFM_REQ_EVT: {
+        // SSP numeric comparison prompt; this implementation auto-confirms.
         ESP_LOGI(BT_HF_TAG, "SSP confirm request, numeric value: %" PRIu32, param->cfm_req.num_val);
         esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
         break;
     }
     case ESP_BT_GAP_KEY_NOTIF_EVT:
+        // SSP passkey shown by peer device for user notification.
         ESP_LOGI(BT_HF_TAG, "SSP passkey notification: %" PRIu32, param->key_notif.passkey);
         break;
     case ESP_BT_GAP_KEY_REQ_EVT: {
+        // SSP passkey input request; respond with configured numeric PIN if valid.
         uint32_t passkey = 0;
         if (parse_ssp_passkey(BT_PIN, &passkey)) {
             ESP_LOGI(BT_HF_TAG, "SSP passkey requested; replying with configured passkey");
@@ -170,15 +181,18 @@ void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
         break;
     }
     case ESP_BT_GAP_PIN_REQ_EVT: {
+        // Legacy PIN pairing request; reject because SSP flow is expected.
         ESP_LOGW(BT_HF_TAG, "Legacy PIN request received while SSP is enabled; rejecting");
         esp_bt_pin_code_t pin_code = {0};
         esp_bt_gap_pin_reply(param->pin_req.bda, false, 0, pin_code);
         break;
     }
     case ESP_BT_GAP_MODE_CHG_EVT:
+        // Controller power mode transition (active/sniff/park/hold).
         ESP_LOGI(BT_HF_TAG, "Power mode changed: %d", param->mode_chg.mode);
         break;
     default:
+        // All other GAP events are intentionally ignored for now.
         ESP_LOGI(BT_HF_TAG, "Unhandled GAP event: %d", event);
         break;
     }
@@ -193,13 +207,17 @@ void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *p
 
     switch (event) {
     case ESP_HF_CLIENT_CONNECTION_STATE_EVT:
+        // HFP link state machine for reconnect and connection bookkeeping.
         switch (param->conn_stat.state) {
         case ESP_HF_CLIENT_CONNECTION_STATE_CONNECTING:
+            // RFCOMM/SLC connection attempt has started.
             hf_connecting = true;
             hf_connected = false;
             break;
         case ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED:
+            // RFCOMM transport connected; service-level connection may follow.
         case ESP_HF_CLIENT_CONNECTION_STATE_SLC_CONNECTED:
+            // Service-level connection ready for call/audio control.
             hf_connecting = false;
             hf_connected = true;
             target_found = true;
@@ -207,11 +225,14 @@ void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *p
             ESP_LOGI(BT_HF_TAG, "HF connected");
             break;
         case ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTING:
+            // Remote/local side is tearing down the HFP link.
             hf_connecting = false;
             hf_connected = false;
             break;
         case ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED:
+            // Link is down; attempt reconnect directly, then via discovery fallback.
         default:
+            // Unknown state falls back to disconnected behavior to recover safely.
             hf_connecting = false;
             hf_connected = false;
             ESP_LOGW(BT_HF_TAG, "HF disconnected; will keep trying to reconnect");
@@ -221,7 +242,102 @@ void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *p
             break;
         }
         break;
+    case ESP_HF_CLIENT_RING_IND_EVT:
+        // Incoming call is ringing on AG; trigger local ringtone/LED feedback here.
+        ring_active = true;
+        ESP_LOGI(BT_HF_TAG, "Incoming ring indication");
+        break;
+    case ESP_HF_CLIENT_CLIP_EVT:
+        // CLIP carries caller ID; persist it so UI can display the current caller.
+        caller_number[0] = '\0';
+        if (param->clip.number) {
+            strncpy(caller_number, param->clip.number, ESP_BT_HF_CLIENT_NUMBER_LEN);
+            caller_number[ESP_BT_HF_CLIENT_NUMBER_LEN] = '\0';
+            ESP_LOGI(BT_HF_TAG, "Incoming caller ID: %s", caller_number);
+        } else {
+            ESP_LOGI(BT_HF_TAG, "Incoming caller ID unavailable");
+        }
+        break;
+    case ESP_HF_CLIENT_CIND_CALL_SETUP_EVT:
+        // Call setup stage drives UI state and ringtone behavior before call is active.
+        call_setup_state = param->call_setup.status;
+        switch (call_setup_state) {
+        case ESP_HF_CALL_SETUP_STATUS_IDLE:
+            // No setup in progress; clear ring only if there is no active call.
+            if (!call_active) {
+                ring_active = false;
+            }
+            ESP_LOGI(BT_HF_TAG, "Call setup: idle");
+            break;
+        case ESP_HF_CALL_SETUP_STATUS_INCOMING:
+            // Incoming setup: ring locally and surface answer/reject affordances.
+            ring_active = true;
+            ESP_LOGI(BT_HF_TAG, "Call setup: incoming");
+            break;
+        case ESP_HF_CALL_SETUP_STATUS_OUTGOING_DIALING:
+            // Outgoing dialing state before remote side starts alerting.
+            ring_active = false;
+            ESP_LOGI(BT_HF_TAG, "Call setup: outgoing dialing");
+            break;
+        case ESP_HF_CALL_SETUP_STATUS_OUTGOING_ALERTING:
+            // Outgoing call is alerting (remote side is ringing).
+            ring_active = false;
+            ESP_LOGI(BT_HF_TAG, "Call setup: outgoing alerting");
+            break;
+        default:
+            // Unexpected setup value from AG; keep state machine alive and log.
+            ESP_LOGW(BT_HF_TAG, "Call setup: unknown status=%d", call_setup_state);
+            break;
+        }
+        break;
+    case ESP_HF_CLIENT_CIND_CALL_EVT:
+        // Active call indicator is the source of truth for in-call vs idle state.
+        call_active = (param->call.status == ESP_HF_CALL_STATUS_CALL_IN_PROGRESS);
+        if (call_active) {
+            ring_active = false;
+            ESP_LOGI(BT_HF_TAG, "Call state: active");
+        } else {
+            if (call_setup_state == ESP_HF_CALL_SETUP_STATUS_IDLE) {
+                ring_active = false;
+            }
+            ESP_LOGI(BT_HF_TAG, "Call state: no active calls");
+        }
+        break;
+    case ESP_HF_CLIENT_AUDIO_STATE_EVT:
+        // SCO/eSCO audio link state controls when to start/stop your audio pipeline.
+        switch (param->audio_stat.state) {
+        case ESP_HF_CLIENT_AUDIO_STATE_CONNECTED:
+            // SCO audio connected with CVSD codec.
+        case ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC:
+            // SCO audio connected with mSBC codec.
+            audio_active = true;
+            ESP_LOGI(BT_HF_TAG, "Audio link connected (state=%d)", param->audio_stat.state);
+            break;
+        case ESP_HF_CLIENT_AUDIO_STATE_CONNECTING:
+            // Audio link setup is in progress; keep pipeline idle until connected.
+            audio_active = false;
+            ESP_LOGI(BT_HF_TAG, "Audio link connecting");
+            break;
+        case ESP_HF_CLIENT_AUDIO_STATE_DISCONNECTED:
+            // Audio path is down; release mic/speaker resources.
+        default:
+            // Unknown value handled as disconnected to avoid stale active audio state.
+            audio_active = false;
+            ESP_LOGI(BT_HF_TAG, "Audio link disconnected");
+            break;
+        }
+        break;
+    case ESP_HF_CLIENT_AT_RESPONSE_EVT:
+        // AT response confirms whether call-control commands succeeded or failed.
+        if (param->at_response.code == ESP_HF_AT_RESPONSE_CODE_OK) {
+            ESP_LOGI(BT_HF_TAG, "AT response OK");
+        } else {
+            ESP_LOGW(BT_HF_TAG, "AT response failure code=%d cme=%d",
+                     param->at_response.code, param->at_response.cme);
+        }
+        break;
     default:
+        // Other HFP events are currently not consumed by this application.
         break;
     }
 }
@@ -245,4 +361,9 @@ void gap_init(void)
     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
 
     start_discovery_if_needed();
+}
+
+bool gap_is_ring_active(void)
+{
+    return ring_active;
 }
