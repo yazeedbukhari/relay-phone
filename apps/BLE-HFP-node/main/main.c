@@ -5,6 +5,8 @@
 #include "esp_bt_device.h"
 #include "gap.h"
 #include "phone.h"
+#include "buttons.h"
+#include "audio.h"
 
 static char *bda2str(esp_bd_addr_t bda, char *str, size_t size)
 {
@@ -21,18 +23,23 @@ static char *bda2str(esp_bd_addr_t bda, char *str, size_t size)
 void app_main(void)
 {
     config_init();
+    buttons_init();
+    audio_init();
     gap_init();
 
     char bda_str[18] = {0};
-    ESP_LOGI("BT_HF", "Own address:[%s]", bda2str((uint8_t *)esp_bt_dev_get_address(), bda_str, sizeof(bda_str)));
+    const uint8_t *own_bda = esp_bt_dev_get_address();
+    const char *own_bda_str = bda2str((uint8_t *)own_bda, bda_str, sizeof(bda_str));
+    ESP_LOGI("BT_HF", "Own address:[%s]", own_bda_str ? own_bda_str : "unavailable");
 
     while (1) {
-        if (gap_is_ring_active()) {
+        if (gap_is_ring_active() && !gap_is_audio_active()) {
             phone_play_ringtone_tick();
+            buttons_poll();
         } else {
             phone_stop_ringtone();
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

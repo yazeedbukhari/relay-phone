@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gap.h"
+#include "audio.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_hf_client_api.h"
@@ -200,8 +201,15 @@ void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 
 void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param)
 {
+    // Some HFP indications (e.g. ring) may arrive without payload.
+    if (!param && event == ESP_HF_CLIENT_RING_IND_EVT) {
+        ring_active = true;
+        ESP_LOGI(BT_HF_TAG, "Incoming ring indication");
+        return;
+    }
+
     if (!param) {
-        ESP_LOGE(BT_HF_TAG, "bt_hf_client_cb called with NULL param");
+        ESP_LOGW(BT_HF_TAG, "bt_hf_client_cb NULL param for event=%d", event);
         return;
     }
 
@@ -311,6 +319,9 @@ void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *p
         case ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC:
             // SCO audio connected with mSBC codec.
             audio_active = true;
+            // Local ringtone uses DAC too; stop it once SCO audio is active.
+            ring_active = false;
+            audio_start();
             ESP_LOGI(BT_HF_TAG, "Audio link connected (state=%d)", param->audio_stat.state);
             break;
         case ESP_HF_CLIENT_AUDIO_STATE_CONNECTING:
@@ -323,6 +334,7 @@ void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *p
         default:
             // Unknown value handled as disconnected to avoid stale active audio state.
             audio_active = false;
+            audio_stop();
             ESP_LOGI(BT_HF_TAG, "Audio link disconnected");
             break;
         }
@@ -349,6 +361,7 @@ void gap_init(void)
     esp_bt_gap_register_callback(bt_gap_cb);
     esp_hf_client_register_callback(bt_hf_client_cb);
     esp_hf_client_init();
+    esp_hf_client_register_data_callback(audio_receive, audio_send);
 
     esp_bt_sp_param_t param_type = ESP_BT_SP_IOCAP_MODE;
     esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
@@ -366,4 +379,29 @@ void gap_init(void)
 bool gap_is_ring_active(void)
 {
     return ring_active;
+}
+
+bool gap_is_audio_active(void)
+{
+    return audio_active;
+}
+
+void gap_answer_call(void)
+{
+    if (!hf_connected) {
+        ESP_LOGW(BT_HF_TAG, "Cannot answer: HF not connected");
+        return;
+    }
+    ESP_LOGI(BT_HF_TAG, "Answering call");
+    esp_hf_client_answer_call();
+}
+
+void gap_reject_call(void)
+{
+    if (!hf_connected) {
+        ESP_LOGW(BT_HF_TAG, "Cannot reject: HF not connected");
+        return;
+    }
+    ESP_LOGI(BT_HF_TAG, "Rejecting call");
+    esp_hf_client_reject_call();
 }
