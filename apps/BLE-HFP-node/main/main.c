@@ -33,9 +33,10 @@ void app_main(void)
     ESP_LOGI("BT_HF", "Own address:[%s]", own_bda_str ? own_bda_str : "unavailable");
 
     while (1) {
+        buttons_poll();
+
         if (gap_is_ring_active() && !gap_is_audio_active()) {
             phone_play_ringtone_tick();
-            buttons_poll();
         } else {
             phone_stop_ringtone();
         }

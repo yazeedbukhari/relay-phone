@@ -26,6 +26,16 @@ static TaskHandle_t audio_task_handle = NULL;
 static SemaphoreHandle_t dac_mutex = NULL;
 static volatile bool audio_running = false;
 
+static void audio_enqueue_dac_u8(const uint8_t *data, size_t len)
+{
+    if (!rb_handle || !data || len == 0) {
+        return;
+    }
+
+    // Non-blocking enqueue; drop if full.
+    xRingbufferSend(rb_handle, data, len, 0);
+}
+
 static void audio_drain_ringbuf(void)
 {
     if (!rb_handle) {
@@ -42,14 +52,9 @@ static void audio_drain_ringbuf(void)
     }
 }
 
-void audio_enqueue_dac_u8(const uint8_t *data, size_t len)
+void audio_enqueue_output_u8(const uint8_t *data, size_t len)
 {
-    if (!rb_handle || !data || len == 0) {
-        return;
-    }
-
-    // Non-blocking enqueue; drop if full.
-    xRingbufferSend(rb_handle, data, len, 0);
+    audio_enqueue_dac_u8(data, len);
 }
 
 // Dedicated task that drains the ring buffer into the DAC.

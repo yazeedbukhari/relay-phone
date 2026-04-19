@@ -41,7 +41,7 @@ void phone_play_ringtone_tick(void)
             ring_phase++;
         }
 
-        audio_enqueue_dac_u8(tone_buf, chunk);
+        audio_enqueue_output_u8(tone_buf, chunk);
         remaining -= chunk;
     }
 }

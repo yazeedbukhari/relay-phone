@@ -29,6 +29,16 @@ static button_state_t reject_btn = {
     .last_change_ms = 0,
 };
 
+static void reject_button_pressed(void)
+{
+    if (gap_is_ring_active()) {
+        gap_reject_call();
+        return;
+    }
+
+    gap_hangup_call();
+}
+
 static void button_poll_and_handle(button_state_t *btn, void (*on_pressed)(void))
 {
     uint32_t now_ms = esp_log_timestamp();
@@ -74,5 +84,5 @@ void buttons_init(void)
 void buttons_poll(void)
 {
     button_poll_and_handle(&answer_btn, gap_answer_call);
-    button_poll_and_handle(&reject_btn, gap_reject_call);
+    button_poll_and_handle(&reject_btn, reject_button_pressed);
 }

@@ -4,6 +4,10 @@
 #include "nvs_flash.h"
 #include "esp_bt_main.h"
 
+static void nvs_init(void);
+static void bt_controller_init_enable(void);
+static void bluedroid_init_enable(void);
+
 void config_init(void)
 {
     nvs_init();
@@ -11,7 +15,7 @@ void config_init(void)
     bluedroid_init_enable();
 }
 
-void nvs_init(void)
+static void nvs_init(void)
 {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -21,7 +25,7 @@ void nvs_init(void)
     ESP_ERROR_CHECK(ret);
 }
 
-void bt_controller_init_enable(void)
+static void bt_controller_init_enable(void)
 {
     esp_err_t ret;
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
@@ -34,7 +38,7 @@ void bt_controller_init_enable(void)
     ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT));
 }
 
-void bluedroid_init_enable(void)
+static void bluedroid_init_enable(void)
 {
     esp_bluedroid_config_t bluedroid_cfg = BT_BLUEDROID_INIT_CONFIG_DEFAULT();
 

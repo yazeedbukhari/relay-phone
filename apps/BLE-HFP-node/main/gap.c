@@ -5,6 +5,7 @@
 #include "gap.h"
 #include "audio.h"
 #include "esp_err.h"
+#include "esp_gap_bt_api.h"
 #include "esp_log.h"
 #include "esp_hf_client_api.h"
 
@@ -108,7 +109,7 @@ static void start_discovery_if_needed(void)
     ESP_LOGI(BT_HF_TAG, "Starting discovery for: %s", REMOTE_DEVICE_NAME);
 }
 
-void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
+static void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 {
     if (!param) {
         ESP_LOGE(BT_HF_TAG, "bt_gap_cb called with NULL param");
@@ -199,7 +200,7 @@ void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
     }
 }
 
-void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param)
+static void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param)
 {
     // Some HFP indications (e.g. ring) may arrive without payload.
     if (!param && event == ESP_HF_CLIENT_RING_IND_EVT) {
@@ -403,5 +404,22 @@ void gap_reject_call(void)
         return;
     }
     ESP_LOGI(BT_HF_TAG, "Rejecting call");
+    esp_hf_client_reject_call();
+}
+
+void gap_hangup_call(void)
+{
+    if (!hf_connected) {
+        ESP_LOGW(BT_HF_TAG, "Cannot hang up: HF not connected");
+        return;
+    }
+
+    if (!call_active && call_setup_state == ESP_HF_CALL_SETUP_STATUS_IDLE) {
+        ESP_LOGW(BT_HF_TAG, "Cannot hang up: no call in progress");
+        return;
+    }
+
+    ESP_LOGI(BT_HF_TAG, "Hanging up call");
+    // esp_hf_client_reject_call() maps to AT+CHUP on AG and hangs up/cancels.
     esp_hf_client_reject_call();
 }
