@@ -1,11 +1,11 @@
-#include "phone.h"
+#include "ringtone.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include "audio.h"
-#include "gap.h"
+#include "bt.h"
 #include "esp_log.h"
 
-#define PHONE_TAG "PHONE"
+#define RINGTONE_TAG "RINGTONE"
 #define RING_FREQ_HZ 1000
 #define RING_SAMPLE_RATE_HZ 16000
 #define RING_TICK_SAMPLES (RING_SAMPLE_RATE_HZ / 10) // app_main loop is 100 ms
@@ -15,12 +15,12 @@
 static bool ringtone_active = false;
 static uint32_t ring_phase = 0;
 
-void phone_play_ringtone_tick(void)
+void ringtone_play_tick(void)
 {
     if (!ringtone_active) {
         audio_start();
         ring_phase = 0;
-        ESP_LOGI(PHONE_TAG, "Ringtone start");
+        ESP_LOGI(RINGTONE_TAG, "Ringtone start");
         ringtone_active = true;
     }
 
@@ -46,16 +46,16 @@ void phone_play_ringtone_tick(void)
     }
 }
 
-void phone_stop_ringtone(void)
+void ringtone_stop(void)
 {
     if (!ringtone_active) {
         return;
     }
 
-    if (!gap_is_audio_active()) {
+    if (!hfp_is_audio_active()) {
         audio_stop();
     }
 
-    ESP_LOGI(PHONE_TAG, "Ringtone stop");
+    ESP_LOGI(RINGTONE_TAG, "Ringtone stop");
     ringtone_active = false;
 }

@@ -1,5 +1,5 @@
 #include "buttons.h"
-#include "gap.h"
+#include "bt.h"
 #include "esp_log.h"
 
 #define BUTTONS_TAG "BUTTONS"
@@ -31,12 +31,12 @@ static button_state_t reject_btn = {
 
 static void reject_button_pressed(void)
 {
-    if (gap_is_ring_active()) {
-        gap_reject_call();
+    if (hfp_is_ring_active()) {
+        hfp_reject_call();
         return;
     }
 
-    gap_hangup_call();
+    hfp_hangup_call();
 }
 
 static void button_poll_and_handle(button_state_t *btn, void (*on_pressed)(void))
@@ -83,6 +83,6 @@ void buttons_init(void)
 
 void buttons_poll(void)
 {
-    button_poll_and_handle(&answer_btn, gap_answer_call);
+    button_poll_and_handle(&answer_btn, hfp_answer_call);
     button_poll_and_handle(&reject_btn, reject_button_pressed);
 }

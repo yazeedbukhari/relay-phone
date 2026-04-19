@@ -2,7 +2,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gap.h"
+#include "bt.h"
 #include "audio.h"
 #include "esp_err.h"
 #include "esp_gap_bt_api.h"
@@ -24,7 +24,7 @@ static bool audio_active = false;
 static esp_hf_call_setup_status_t call_setup_state = ESP_HF_CALL_SETUP_STATUS_IDLE;
 static char caller_number[ESP_BT_HF_CLIENT_NUMBER_LEN + 1];
 
-static bool parse_ssp_passkey(const char *passkey_str, uint32_t *passkey_out)
+static bool bt_gap_parse_ssp_passkey(const char *passkey_str, uint32_t *passkey_out)
 {
     if (!passkey_str || !passkey_out || *passkey_str == '\0') {
         return false;
@@ -46,7 +46,7 @@ static bool parse_ssp_passkey(const char *passkey_str, uint32_t *passkey_out)
     return true;
 }
 
-static bool get_name_from_eir(uint8_t *eir, char *bdname, uint8_t *bdname_len)
+static bool bt_gap_get_name_from_eir(uint8_t *eir, char *bdname, uint8_t *bdname_len)
 {
     if (!eir) {
         return false;
@@ -77,7 +77,7 @@ static bool get_name_from_eir(uint8_t *eir, char *bdname, uint8_t *bdname_len)
     return false;
 }
 
-static bool connect_target_phone(void)
+static bool hfp_connect_target_phone(void)
 {
     if (!target_found || hf_connected || hf_connecting) {
         return false;
@@ -94,7 +94,7 @@ static bool connect_target_phone(void)
     return true;
 }
 
-static void start_discovery_if_needed(void)
+static void bt_gap_start_discovery_if_needed(void)
 {
     if (discovery_active || hf_connected || hf_connecting) {
         return;
@@ -109,10 +109,10 @@ static void start_discovery_if_needed(void)
     ESP_LOGI(BT_HF_TAG, "Starting discovery for: %s", REMOTE_DEVICE_NAME);
 }
 
-static void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
+static void bt_gap_event_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 {
     if (!param) {
-        ESP_LOGE(BT_HF_TAG, "bt_gap_cb called with NULL param");
+        ESP_LOGE(BT_HF_TAG, "bt_gap_event_cb called with NULL param");
         return;
     }
 
@@ -125,13 +125,13 @@ static void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 
         for (int i = 0; i < param->disc_res.num_prop; i++) {
             if (param->disc_res.prop[i].type == ESP_BT_GAP_DEV_PROP_EIR
-                && get_name_from_eir(param->disc_res.prop[i].val, peer_bdname, &peer_bdname_len)) {
+                && bt_gap_get_name_from_eir(param->disc_res.prop[i].val, peer_bdname, &peer_bdname_len)) {
                 if (strcmp(peer_bdname, REMOTE_DEVICE_NAME) == 0) {
                     memcpy(peer_addr, param->disc_res.bda, ESP_BD_ADDR_LEN);
                     ESP_LOGI(BT_HF_TAG, "Found target device: %s", peer_bdname);
                     ESP_LOG_BUFFER_HEX(BT_HF_TAG, peer_addr, ESP_BD_ADDR_LEN);
                     target_found = true;
-                    connect_target_phone();
+                    hfp_connect_target_phone();
                     esp_bt_gap_cancel_discovery();
                     break;
                 }
@@ -145,8 +145,8 @@ static void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
         ESP_LOGI(BT_HF_TAG, "Discovery state: %s",
                  discovery_active ? "started" : "stopped");
         if (!discovery_active && !hf_connected) {
-            if (!connect_target_phone()) {
-                start_discovery_if_needed();
+            if (!hfp_connect_target_phone()) {
+                bt_gap_start_discovery_if_needed();
             }
         }
         break;
@@ -173,7 +173,7 @@ static void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
     case ESP_BT_GAP_KEY_REQ_EVT: {
         // SSP passkey input request; respond with configured numeric PIN if valid.
         uint32_t passkey = 0;
-        if (parse_ssp_passkey(BT_PIN, &passkey)) {
+        if (bt_gap_parse_ssp_passkey(BT_PIN, &passkey)) {
             ESP_LOGI(BT_HF_TAG, "SSP passkey requested; replying with configured passkey");
             esp_bt_gap_ssp_passkey_reply(param->key_req.bda, true, passkey);
         } else {
@@ -200,7 +200,7 @@ static void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
     }
 }
 
-static void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param)
+static void hfp_client_event_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param)
 {
     // Some HFP indications (e.g. ring) may arrive without payload.
     if (!param && event == ESP_HF_CLIENT_RING_IND_EVT) {
@@ -210,7 +210,7 @@ static void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_par
     }
 
     if (!param) {
-        ESP_LOGW(BT_HF_TAG, "bt_hf_client_cb NULL param for event=%d", event);
+        ESP_LOGW(BT_HF_TAG, "hfp_client_event_cb NULL param for event=%d", event);
         return;
     }
 
@@ -245,8 +245,8 @@ static void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_par
             hf_connecting = false;
             hf_connected = false;
             ESP_LOGW(BT_HF_TAG, "HF disconnected; will keep trying to reconnect");
-            if (!connect_target_phone()) {
-                start_discovery_if_needed();
+            if (!hfp_connect_target_phone()) {
+                bt_gap_start_discovery_if_needed();
             }
             break;
         }
@@ -355,12 +355,12 @@ static void bt_hf_client_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_par
     }
 }
 
-void gap_init(void)
+void bt_gap_init(void)
 {
     esp_bt_gap_set_device_name("ESP_HFP_HF");
 
-    esp_bt_gap_register_callback(bt_gap_cb);
-    esp_hf_client_register_callback(bt_hf_client_cb);
+    esp_bt_gap_register_callback(bt_gap_event_cb);
+    esp_hf_client_register_callback(hfp_client_event_cb);
     esp_hf_client_init();
     esp_hf_client_register_data_callback(audio_receive, audio_send);
 
@@ -374,20 +374,20 @@ void gap_init(void)
 
     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
 
-    start_discovery_if_needed();
+    bt_gap_start_discovery_if_needed();
 }
 
-bool gap_is_ring_active(void)
+bool hfp_is_ring_active(void)
 {
     return ring_active;
 }
 
-bool gap_is_audio_active(void)
+bool hfp_is_audio_active(void)
 {
     return audio_active;
 }
 
-void gap_answer_call(void)
+void hfp_answer_call(void)
 {
     if (!hf_connected) {
         ESP_LOGW(BT_HF_TAG, "Cannot answer: HF not connected");
@@ -397,7 +397,7 @@ void gap_answer_call(void)
     esp_hf_client_answer_call();
 }
 
-void gap_reject_call(void)
+void hfp_reject_call(void)
 {
     if (!hf_connected) {
         ESP_LOGW(BT_HF_TAG, "Cannot reject: HF not connected");
@@ -407,7 +407,7 @@ void gap_reject_call(void)
     esp_hf_client_reject_call();
 }
 
-void gap_hangup_call(void)
+void hfp_hangup_call(void)
 {
     if (!hf_connected) {
         ESP_LOGW(BT_HF_TAG, "Cannot hang up: HF not connected");

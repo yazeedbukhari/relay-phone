@@ -1,4 +1,4 @@
-idf_component_register(SRCS "audio.c" "buttons.c" "phone.c" "gap.c" "config.c" "main.c"
+idf_component_register(SRCS "audio.c" "buttons.c" "ringtone.c" "bt.c" "bt_init.c" "main.c"
                        INCLUDE_DIRS "."
                        REQUIRES bt nvs_flash esp_driver_dac esp_driver_gpio esp_ringbuf)
 
