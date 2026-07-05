@@ -8,8 +8,13 @@
 #include "esp_gap_bt_api.h"
 #include "esp_log.h"
 #include "esp_hf_client_api.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #define BT_HF_TAG "BT_HF"
+#define MIC_FEED_TASK_STACK_BYTES 2048
+#define MIC_FEED_INTERVAL_MS 10
+#define MIC_FEED_LOG_INTERVAL_MS 1000
 
 static esp_bd_addr_t peer_addr;
 static char peer_bdname[ESP_BT_GAP_MAX_BDNAME_LEN + 1];
@@ -23,6 +28,32 @@ static bool ring_active = false;
 static bool audio_active = false;
 static esp_hf_call_setup_status_t call_setup_state = ESP_HF_CALL_SETUP_STATUS_IDLE;
 static char caller_number[ESP_BT_HF_CLIENT_NUMBER_LEN + 1];
+static TaskHandle_t mic_feed_task_handle = NULL;
+
+static void hfp_mic_feed_task(void *arg)
+{
+    uint32_t last_log_ms = 0;
+    uint32_t ready_count = 0;
+
+    while (true) {
+        if (!audio_active) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
+        esp_hf_client_outgoing_data_ready();
+        ready_count++;
+
+        uint32_t now_ms = esp_log_timestamp();
+        if ((now_ms - last_log_ms) >= MIC_FEED_LOG_INTERVAL_MS) {
+            ESP_LOGI(BT_HF_TAG, "Mic outgoing-data ready signals: %" PRIu32 "/sec", ready_count);
+            ready_count = 0;
+            last_log_ms = now_ms;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(MIC_FEED_INTERVAL_MS));
+    }
+}
 
 static bool bt_gap_parse_ssp_passkey(const char *passkey_str, uint32_t *passkey_out)
 {
@@ -363,6 +394,12 @@ void bt_gap_init(void)
     esp_hf_client_register_callback(hfp_client_event_cb);
     esp_hf_client_init();
     esp_hf_client_register_data_callback(audio_receive, audio_send);
+
+    BaseType_t task_ok = xTaskCreate(hfp_mic_feed_task, "hfp_mic_feed", MIC_FEED_TASK_STACK_BYTES,
+                                     NULL, 5, &mic_feed_task_handle);
+    if (task_ok != pdPASS) {
+        ESP_LOGE(BT_HF_TAG, "Failed to create mic feed task");
+    }
 
     esp_bt_sp_param_t param_type = ESP_BT_SP_IOCAP_MODE;
     esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
